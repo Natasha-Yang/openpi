@@ -984,18 +984,26 @@ _CONFIGS = [
             pi05=True,
             action_dim=32,  # pi05 is trained with 32-dim actions
             action_horizon=16,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
         ),
         data=LeRobotRoboEvalDataConfig(
-            repo_id="NatashaYang/pick_single_book_pos_orient",
+            repo_id="NatashaYang/roboeval_lerobot_dataset",
             base_config=DataConfig(prompt_from_task=True),
             assets=AssetsConfig(
                 assets_dir="assets/pi05_roboeval_finetune/NatashaYang/",
-                asset_id="pick_single_book_pos_orient",
+                asset_id="roboeval_lerobot_dataset",
             ),
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_droid/params"),
         num_train_steps=20_000,
         batch_size=32,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
     ),
     #
     # Debugging configs.

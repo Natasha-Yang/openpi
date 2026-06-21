@@ -20,6 +20,7 @@ import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
+import openpi.policies.roboeval_policy as roboeval_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -194,9 +195,11 @@ class DataConfigFactory(abc.ABC):
             data_assets_dir = str(assets_dir / asset_id)
             norm_stats = _normalize.load(_download.maybe_download(data_assets_dir))
             logging.info(f"Loaded norm stats from {data_assets_dir}")
+            print(f"Loaded norm stats from {data_assets_dir}")
             return norm_stats
         except FileNotFoundError:
             logging.info(f"Norm stats not found in {data_assets_dir}, skipping.")
+            print(f"Norm stats not found in {data_assets_dir}, skipping.")
         return None
 
 
@@ -451,6 +454,48 @@ class LeRobotDROIDDataConfig(DataConfigFactory):
         data_transforms = _transforms.Group(
             inputs=[droid_policy.DroidInputs(model_type=model_config.model_type)],
             outputs=[droid_policy.DroidOutputs()],
+        )
+        model_transforms = ModelTransformFactory()(model_config)
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotRoboEvalDataConfig(DataConfigFactory):
+    """
+    Data config for RoboEval dataset in LeRobot format.
+    """
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/head": "rgb_head",
+                        "observation/wrist_image_right": "rgb_right_wrist",
+                        "observation/wrist_image_left": "rgb_left_wrist",
+                        "observation/joint_position": "joint_position",
+                        "observation/gripper_position": "gripper_position",
+                        "actions": "actions",
+                        "prompt": "task",
+                    }
+                )
+            ]
+        )
+        data_transforms = _transforms.Group(
+            inputs=[roboeval_policy.RoboEvalInputs(model_type=model_config.model_type)],
+            outputs=[roboeval_policy.RoboEvalOutputs()],
+        )
+        delta_action_mask = _transforms.make_bool_mask(7, -1, 7, -1)
+        data_transforms = data_transforms.push(
+            inputs=[_transforms.DeltaActions(delta_action_mask)],
+            outputs=[_transforms.AbsoluteActions(delta_action_mask)],
         )
         model_transforms = ModelTransformFactory()(model_config)
 
@@ -929,6 +974,28 @@ _CONFIGS = [
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
         num_train_steps=20_000,
+    ),
+    #
+    # RoboEval configs.
+    #
+    TrainConfig(
+        name="pi05_roboeval_finetune",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_dim=32,  # pi05 is trained with 32-dim actions
+            action_horizon=16,
+        ),
+        data=LeRobotRoboEvalDataConfig(
+            repo_id="NatashaYang/pick_single_book_pos_orient",
+            base_config=DataConfig(prompt_from_task=True),
+            assets=AssetsConfig(
+                assets_dir="assets/pi05_roboeval_finetune/NatashaYang/",
+                asset_id="pick_single_book_pos_orient",
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_droid/params"),
+        num_train_steps=20_000,
+        batch_size=32,
     ),
     #
     # Debugging configs.
